@@ -6,7 +6,11 @@ targets joined by one artifact:
 
     train ──(adapter)──> eval
 
-`train` runs `sr-train` against a config this recipe generates from
+Both targets run on BlueVela through `space://steps/custom_code_lsf` on
+`space://environments/bluevela` — the LSF-native pair the `public` space
+publishes.
+
+`train` runs `sr-train` against a config [`train.sh`](train.sh) generates from
 [`parameters.yaml`](parameters.yaml). `eval` binds the adapter it produced and
 runs `shadow_residual.eval.answerability_eval --mode peft`, which rebuilds the
 SR base and attaches the adapter through stock PEFT. Both targets bind the same
@@ -117,7 +121,9 @@ Explicitly, or with a different parameter set:
       --space <your-space>
 
 The configuration is rank 16, alpha 32, dropout 0.05, lr 5e-5 cosine with 0.05
-warmup, 3 epochs, `max_length` 8192, batch 1 × grad accum 8, seed 0, one H100.
+warmup, 3 epochs, `max_length` 8192, batch 1 × grad accum 8, seed 0, one GPU
+on one node, on the `normal` queue under `grp_granite_dot_build` — not the
+step's own `preemptable` default, since a preempted training job loses the run.
 
 ### The 3B variant
 
@@ -177,21 +183,47 @@ roughly double activation memory and this is an 8B model at 8192 context. SR's
 dual-stream decoder forward is pure, so recompute is exact — checkpointing costs
 wall clock, not correctness.
 
-## Why the code is cloned from github.com
+## How the code reaches the cluster
 
-The `byoc` step does an **unauthenticated** `git clone`, so the repo it clones
-must be publicly readable. That rules out the IBM-internal candidates: the
-internal GitHub Enterprise refuses anonymous clones outright, and its
-`shadow-residual` mirror is in any case about six weeks behind the github.com
-repo. `SR_REPO` therefore points at github.com and should stay there.
+There is no container image. The step clones one repo, materializes a conda
+environment from a file in it, installs into that environment, and runs a
+script from the clone:
 
-Pin `SR_REF` to a tag or SHA for anything you intend to compare against later.
-`main` is the default because that is the branch whose API the generated config
-is written against, not because tracking a moving branch is desirable.
+| `byoc_config` field | Value | Why |
+|---|---|---|
+| `github_url` / `github_ref` | `HARNESS_REPO` / `HARNESS_REF` | **this** repo — the step requires the conda env file and the run scripts to exist in the clone, and keeping them beside `build.yaml` is what stops recipe and harness drifting apart |
+| `conda_lockfile_path` | [`environment.yml`](environment.yml) | python 3.11 + pip, nothing else |
+| `setup_command` | `pip install 'shadow-residual[train] @ git+$SR_REPO@$SR_REF' tensorboard` | shadow-residual from its own public repo, pinned |
+| `start_command` | `bash $REPO_ROOT/…/train.sh` | the clone is on `$PYTHONPATH` already |
 
-Everything else the run needs is public too — the base model from the Hub, the
-dependencies from PyPI. The data is the sole exception, and only because this
-first round reads it from a private repo.
+Three consequences worth knowing before the first run.
+
+**The job runs the *pushed* ref.** `build.yaml` is read from your local disk,
+but the scripts come from `HARNESS_REF` as it exists on github.com. Editing
+`train.sh` locally changes nothing until you push. Pin `HARNESS_REF` to a SHA
+for any run you intend to compare against later; a branch name is fine while
+iterating.
+
+**The environment is cached, keyed by
+`sha256(environment.yml + setup_command + dependency_files)`** — and
+deliberately *not* by the commit SHA, so script edits reuse the cached env and
+only a dependency change rebuilds it. `SR_REF` lives inside `setup_command`, so
+bumping it does force a rebuild. Both targets pass the identical
+`setup_command`, which is why eval reuses the environment train built.
+
+**torch comes from PyPI, not from a pinned CUDA image.** That is the one
+regression against the previous SkyPilot form of this recipe, where
+`pytorch/pytorch:2.6.0-cuda12.4` guaranteed the torch/CUDA pairing. Now the
+wheel's bundled CUDA has to work against BlueVela's drivers. If a run dies in
+`cuda_init`, pin a torch version in `environment.yml` rather than chasing it in
+`setup_command`, so the cache key moves with it.
+
+No editable install (`pip install -e .`): it would tie the cached environment
+to one job's repo path, and the step's README rules it out for that reason.
+
+Everything the run needs is public — the harness, shadow-residual, the base
+model from the Hub, the dependencies from PyPI. The data is the sole exception,
+and only because this first round reads it from a private repo.
 
 ## Checking the run did real work
 
@@ -253,5 +285,9 @@ across 3 epochs would not.
   (already passed): in-job generation gathers the model on rank 0 while the
   other ranks sit at a collective barrier, and a full eval set outlives the
   default 30-minute timeout.
-- **No dependency caching.** `byoc` installs from PyPI on every run; the image
-  supplies torch and CUDA, so this is a couple of minutes, not a rebuild.
+- **No multi-node.** `custom_code_lsf` is single-node in v1 regardless of what
+  this recipe asks for. It exports the `$LLMB_NNODES` / `$LLMB_MASTER_ADDR`
+  contract with trivial values, so a multi-node start command would work
+  unchanged when v2 ships.
+- **One output artifact per target**, which is the step's v1 limit and exactly
+  what this recipe produces: the adapter, then the report.

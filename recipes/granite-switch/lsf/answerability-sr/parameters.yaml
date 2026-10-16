@@ -2,23 +2,36 @@
 # Override any of these with: gb build start ... --param KEY=VALUE
 
 # ── Environment ──────────────────────────────────────────────────────────────
-ENVIRONMENT_URI: "space://environments/skypilot/lsf/ibm-bluevela"
+# BlueVela through its LSF-native environment, which is what the `public` space
+# publishes (`gb step list` / the space's environments/ directory). There is no
+# container image: custom_code_lsf materializes a conda env from
+# environment.yml beside this file and installs into it, so torch arrives as a
+# PyPI wheel rather than inside a pinned CUDA image.
+ENVIRONMENT_URI: "space://environments/bluevela"
 
-# Public container image both targets run in. Pinned (not :latest) so a run is
-# reproducible. torch 2.6 + CUDA 12.4 is the pairing the shadow-residual repo
-# documents for its own GPU runs, and python 3.11 sits inside the package's
-# requires-python (>=3.10,<3.14). The step renders this as SkyPilot
-# `docker:<image>`; BlueVela runs it under enroot.
-IMAGE: "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime"
+# ── Harness ──────────────────────────────────────────────────────────────────
+# The repo the step clones. It needs to be this one, because the step requires
+# a conda env file and the two run scripts to exist in the clone, and keeping
+# them beside build.yaml is what stops the recipe and its harness drifting
+# apart. Public, so the clone needs no credential of its own.
+#
+# The job clones the PUSHED ref, while build.yaml is read from your local disk:
+# an edit to train.sh changes nothing until it is pushed. Pin HARNESS_REF to a
+# SHA for any run you intend to compare against later.
+HARNESS_REPO: "github.com/touma-I/granite.build"
+HARNESS_REF: "sr-ans-lsf-port"
 
 # ── Code under test ──────────────────────────────────────────────────────────
-# The byoc step does an UNAUTHENTICATED `git clone`, so this must be a public
-# repo. shadow-residual on github.com is public; the internal GitHub Enterprise
-# mirror of the same name is both auth-walled and ~6 weeks stale, so do not
-# repoint here.
+# shadow-residual is pip-installed from here into the conda env, as
+# `shadow-residual[train] @ git+<SR_REPO>@<SR_REF>` — not cloned into the
+# workspace, because an editable install would tie the step's cached env to one
+# job's repo path. The public github.com repo, not the internal GitHub
+# Enterprise mirror of the same name, which is both auth-walled and ~6 weeks
+# stale.
 SR_REPO: "https://github.com/generative-computing/shadow-residual"
-# Pin a SHA or tag for reproducibility. `main` tracks the stock-PEFT API this
-# recipe's generated config is written against.
+# Pin a SHA or tag for reproducibility. `main` tracks the stock-PEFT API the
+# generated config is written against. This value is part of the env cache key,
+# so changing it rebuilds the environment rather than silently reusing it.
 SR_REF: "main"
 
 # ── Model ────────────────────────────────────────────────────────────────────
@@ -142,18 +155,21 @@ EVAL_MAX_NEW_TOKENS: 30
 EVAL_DATASET_SIZE: 100000
 
 # ── Compute ──────────────────────────────────────────────────────────────────
-# 1 GPU is what intrinsics_training used for this exact config and model size.
-# accelerators is PER NODE; memory is host memory per node, in GB.
+# One GPU, which is what this config and model size were validated at. The step
+# is single-node in v1 regardless. Memory is host memory per node.
 NUM_NODES: 1
 NUM_GPUS_PER_NODE: 1
-ACCELERATORS: "H100:1"
-MEMORY: 80
-CLUSTER: "bluevela"
-# For the LSF cloud, SkyPilot's `zone` is the queue name.
-QUEUE: "normal"
+NUM_CPUS_PER_NODE: 16
+TOTAL_MEMORY_PER_NODE: "128Gi"
 
-# Eval is a single-GPU generation pass over the eval set; it needs no more
-# hardware than training and is kept separate so the two can be sized apart.
+# `normal`, not the step's own `preemptable` default: a preempted training job
+# loses the run. The group has to match the queue — grp_granite_dot_build for
+# normal, grp_preemptable for preemptable.
+QUEUE: "normal"
+LSF_GROUP: "grp_granite_dot_build"
+
+# Eval is a single-GPU generation pass; it needs no more hardware than training
+# and is kept separate so the two can be sized apart.
 EVAL_NUM_GPUS_PER_NODE: 1
-EVAL_ACCELERATORS: "H100:1"
-EVAL_MEMORY: 80
+EVAL_NUM_CPUS_PER_NODE: 8
+EVAL_TOTAL_MEMORY_PER_NODE: "128Gi"

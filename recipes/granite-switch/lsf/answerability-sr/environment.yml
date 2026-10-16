@@ -1,0 +1,19 @@
+# Conda environment for this recipe, built once by custom_code_lsf and reused.
+#
+# The step runs `conda env create --file <this> --prefix <cache>/byoc-<hash>`,
+# where hash = sha256(this file + setup_command + dependency_files). The commit
+# SHA is deliberately NOT in that key, so editing the run scripts reuses the
+# env and only a dependency change rebuilds it.
+#
+# Deliberately minimal: python and pip only. Everything else — torch included —
+# comes from PyPI in `setup_command`, because shadow-residual's own [train]
+# extra is what defines the dependency set, and restating it here would let the
+# two drift. 3.11 sits inside its requires-python (>=3.10,<3.14).
+#
+# No `name:` key: the step creates the env by prefix, and a file naming an
+# environment while --prefix is given is a conda error.
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
