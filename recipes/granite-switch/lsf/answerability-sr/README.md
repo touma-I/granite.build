@@ -221,6 +221,27 @@ wheel's bundled CUDA has to work against BlueVela's drivers. If a run dies in
 No editable install (`pip install -e .`): it would tie the cached environment
 to one job's repo path, and the step's README rules it out for that reason.
 
+### Two traps in this step, both hit on the first run
+
+**Invoke modules, not console scripts.** The step builds the env at a
+temporary prefix (`byoc-<hash>.tmp.<pid>`) and moves it to its final path, but
+pip bakes an absolute interpreter path into console-script shebangs at install
+time. So `sr-train` resolves to an interpreter that no longer exists and the job
+dies with exit 126, `bad interpreter`. Both scripts here use
+`python -m shadow_residual.…`, which resolves python at runtime and is the same
+entry point (`sr-train` is `shadow_residual.training.train:main`). Anything new
+added to these scripts should follow the same rule.
+
+**Keep `$OUTPUT_PATH` empty until the work has succeeded.** The step emits its
+artifact event when `$OUTPUT_PATH` has any content *even on failure*
+(`run_workload.sh`), by design. A file written there early therefore turns a
+failed run into a published artifact, and the eval target starts against an
+adapter that was never trained. `train.sh` writes its generated config to a
+temp directory and copies it in only after the adapter exists. This is also why
+both scripts assert their inputs: once training has begun writing checkpoints a
+mid-run failure can still publish, so the consuming target has to check rather
+than trust.
+
 Everything the run needs is public — the harness, shadow-residual, the base
 model from the Hub, the dependencies from PyPI. The data is the sole exception,
 and only because this first round reads it from a private repo.

@@ -45,9 +45,12 @@ for f in "$TRAIN_DIR/train.jsonl" "$TRAIN_DIR/test.jsonl"; do
     test -f "$f" || { echo "ERROR: missing $f — check TRAIN_DATA_SUBDIR" >&2; exit 1; }
 done
 
-# The config lands inside the artifact on purpose: the adapter directory then
-# carries the exact configuration that produced it. PEFT ignores the extra file.
-CFG="$OUTPUT_PATH/sr_answerability.yaml"
+# Deliberately NOT written inside $OUTPUT_PATH yet. The step emits its
+# artifact event whenever $OUTPUT_PATH has any content "even on failure"
+# (run_workload.sh), so a stray file there turns a failed run into a published
+# artifact and lets the eval target start against an adapter that was never
+# trained. It is copied in at the end, once there is something to describe.
+CFG="$(mktemp -d)/sr_answerability.yaml"
 cat > "$CFG" <<YAML
 model:
   base: ${BASE}
@@ -105,8 +108,15 @@ cat "$CFG"
 EXTRA=()
 if [ "${MAX_STEPS:-0}" -gt 0 ]; then EXTRA+=(--max-steps "$MAX_STEPS"); fi
 
+# `python -m`, NOT the `sr-train` console script. The step builds the conda env
+# at a temporary prefix and moves it to its final path, while pip bakes an
+# absolute interpreter path into console-script shebangs at install time — so
+# `sr-train` points at an interpreter that no longer exists and dies with exit
+# 126, "bad interpreter". Module invocation resolves python at runtime.
+# sr-train is exactly shadow_residual.training.train:main, and that module has
+# a __main__ guard, so this is the same entry point.
 echo "=== training ==="
-sr-train --config "$CFG" --skip-post-train-generate ${EXTRA[@]+"${EXTRA[@]}"}
+python -m shadow_residual.training.train --config "$CFG" --skip-post-train-generate ${EXTRA[@]+"${EXTRA[@]}"}
 
 test -f "$OUTPUT_PATH/adapter_config.json" || {
     echo "ERROR: training wrote no adapter_config.json to $OUTPUT_PATH" >&2
@@ -125,6 +135,10 @@ cfg["base_model_name_or_path"] = base_id
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
 PY
+
+# Now that there is a real adapter, keep the config beside it: the artifact
+# then carries the exact configuration that produced it. PEFT ignores the file.
+cp "$CFG" "$OUTPUT_PATH/sr_answerability.yaml"
 
 echo "=== adapter base recorded as ==="
 grep base_model_name_or_path "$OUTPUT_PATH/adapter_config.json"
