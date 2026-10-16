@@ -119,6 +119,31 @@ Explicitly, or with a different parameter set:
 The configuration is rank 16, alpha 32, dropout 0.05, lr 5e-5 cosine with 0.05
 warmup, 3 epochs, `max_length` 8192, batch 1 × grad accum 8, seed 0, one H100.
 
+### The 3B variant
+
+`ibm-granite/granite-4.2-3b` is a drop-in swap for a cheaper run. It ships the
+8B's tokenizer and chat template byte for byte (`tokenizer.json` sha256
+`883975314d58…`, `chat_template.jinja` sha256 `f0ba43f79b3c…`) and is the same
+dense `model_type: granite`, 40 layers. So the staged data, `ASSISTANT_MARKER`
+and `LAST_TOKEN` all carry over untouched — including the export's overlength
+filtering, which was computed with that same tokenizer — and only the two model
+parameters move:
+
+    gb build start -f recipes/granite-switch/lsf/answerability-sr/build.yaml \
+      --space <your-space> \
+      --param BASE_MODEL_URI=hf:///ibm-granite/granite-4.2-3b \
+      --param BASE_MODEL_ID=ibm-granite/granite-4.2-3b
+
+Two `--param`s rather than a `parameters-3b.yaml`: `--parameters-path`
+*replaces* the sibling `parameters.yaml` instead of layering over it, so a
+partial file would leave every other parameter undefined. `--param` does layer
+onto the file, which makes it the right tool for a two-value delta.
+
+Append `--param MAX_STEPS=2 --param NUM_EPOCHS=1 --param EVAL_DATASET_SIZE=100`
+to smoke-test it (see [Smoke-testing](#smoke-testing)). A 3B's scores are not
+comparable to the 8B figures further down, and a capped run's scores are not
+comparable to anything — that run is testing plumbing.
+
 ## The parameters that are load-bearing in a non-obvious way
 
 Every config sub-model `sr-train` validates is Pydantic `extra="forbid"`, so a
