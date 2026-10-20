@@ -26,6 +26,20 @@ set -euo pipefail
 : "${GRADIENT_CHECKPOINTING:?}" "${SAVE_TOTAL_LIMIT:?}" "${NUM_EPOCHS:?}"
 : "${SEED:?}" "${LOGGING_STEPS:?}" "${DATALOADER_NUM_WORKERS:?}" "${REPORT_TO:?}"
 
+# The marker is the one value here carrying a backslash escape, and it passes
+# through two YAML parses and a line-based env loader on the way (see the
+# comment beside it in build.yaml). Each of those can eat the escape: a real
+# newline breaks the step's loader outright, while a dropped one trains against
+# a silently mis-anchored loss mask. Check the literal two characters survived.
+case "$ASSISTANT_MARKER" in
+  *'\n<think></think>') : ;;
+  *) echo "ERROR: ASSISTANT_MARKER arrived as $(printf '%q' "$ASSISTANT_MARKER")," >&2
+     echo "       expected it to end in the two literal characters \\n followed by" >&2
+     echo "       <think></think>. The escape was consumed in transit — check the" >&2
+     echo "       quoting of ASSISTANT_MARKER in build.yaml's byoc_config.env." >&2
+     exit 1 ;;
+esac
+
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 

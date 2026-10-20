@@ -104,7 +104,20 @@ granite.build:
                 BASE: "{{ bindings.base_model.binding.path }}"
                 BASE_MODEL_ID: "$${BASE_MODEL_ID}"
                 MAX_LENGTH: "$${MAX_LENGTH}"
-                ASSISTANT_MARKER: "$${ASSISTANT_MARKER}"
+                # SINGLE-quoted deliberately. This value is the one parameter
+                # carrying a backslash escape (\n), and there are two YAML
+                # parses between parameters.yaml and the job: this file, then
+                # the rendered copy the cluster reads. A double-quoted scalar
+                # here spends the escape at the second parse, so the marker
+                # arrives holding a REAL newline — and the step loads this env
+                # block line-by-line (`while IFS= read -r k v` in its
+                # run_workload.sh), so the newline splits the value in two and
+                # the remainder is read as a variable name:
+                #     export: `<think></think>=': not a valid identifier
+                # Single quotes keep the backslash literal all the way to
+                # train.sh, whose own heredoc writes it into the generated
+                # config as "\n" for sr-train to unescape exactly once.
+                ASSISTANT_MARKER: '$${ASSISTANT_MARKER}'
                 LAST_CONTEXT_TOKEN: "$${LAST_CONTEXT_TOKEN}"
                 LAST_TOKEN: "$${LAST_TOKEN}"
                 LORA_RANK: "$${LORA_RANK}"
