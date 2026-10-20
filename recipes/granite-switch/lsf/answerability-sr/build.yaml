@@ -105,6 +105,7 @@ granite.build:
                 BASE_MODEL_ID: "$${BASE_MODEL_ID}"
                 MAX_LENGTH: "$${MAX_LENGTH}"
                 ASSISTANT_MARKER: "$${ASSISTANT_MARKER}"
+                LAST_CONTEXT_TOKEN: "$${LAST_CONTEXT_TOKEN}"
                 LAST_TOKEN: "$${LAST_TOKEN}"
                 LORA_RANK: "$${LORA_RANK}"
                 CROSS_STREAM_RANK: "$${CROSS_STREAM_RANK}"

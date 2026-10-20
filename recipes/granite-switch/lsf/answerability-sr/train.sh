@@ -19,7 +19,7 @@ set -euo pipefail
 # Fail on an unset or empty variable here, naming it, rather than letting an
 # empty path reach the trainer and surface as a confusing loader error.
 : "${TRAIN_DIR:?}" "${BASE:?}" "${OUTPUT_PATH:?}" "${BASE_MODEL_ID:?}"
-: "${MAX_LENGTH:?}" "${ASSISTANT_MARKER:?}" "${LAST_TOKEN:?}"
+: "${MAX_LENGTH:?}" "${ASSISTANT_MARKER:?}" "${LAST_TOKEN:?}" "${LAST_CONTEXT_TOKEN:?}"
 : "${LORA_RANK:?}" "${CROSS_STREAM_RANK:?}" "${LORA_ALPHA:?}" "${LORA_DROPOUT:?}"
 : "${LEARNING_RATE:?}" "${WEIGHT_DECAY:?}" "${LR_SCHEDULER:?}" "${WARMUP_RATIO:?}"
 : "${PER_DEVICE_TRAIN:?}" "${GRADIENT_ACCUMULATION:?}" "${PER_DEVICE_EVAL:?}"
@@ -69,6 +69,7 @@ adapter:
     cross_stream: ${CROSS_STREAM_RANK}
   alpha: ${LORA_ALPHA}
   dropout: ${LORA_DROPOUT}
+  last_context_token: "${LAST_CONTEXT_TOKEN}"
   last_token: "${LAST_TOKEN}"
 optimizer:
   name: adamw_torch
